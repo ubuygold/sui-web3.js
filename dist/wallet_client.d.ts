@@ -4,6 +4,7 @@ import { GetObjectDataResponse, SuiAddress, TransactionEffects } from './types';
 import { JsonRpcProvider } from './providers/json-rpc-provider';
 import { RpcTxnDataSerializer } from './signers/txn-data-serializers/rpc-txn-data-serializer';
 import { ObjectId } from './types/objects';
+import { NftClient } from './nft_client';
 import { SignableTransaction } from './signers/txn-data-serializers/txn-data-serializer';
 import { Base64DataBuffer } from './serialization/base64';
 export interface AccountMetaData {
@@ -18,6 +19,7 @@ export interface Wallet {
 export declare class WalletClient {
     provider: JsonRpcProvider;
     serializer: RpcTxnDataSerializer;
+    nftClient: NftClient;
     constructor(nodeUrl?: string, faucetUrl?: string);
     /**
      * Creates new account with bip44 path and mnemonics,
@@ -73,7 +75,6 @@ export declare class WalletClient {
         decimals: number;
         coinTypeArg: string;
     }[]>;
-    generateTransaction(address: SuiAddress, tx: SignableTransaction | string | Base64DataBuffer): Promise<Base64DataBuffer>;
     /**
      * Dry run a transaction and return the result.
      * @param address address of the account
@@ -86,6 +87,6 @@ export declare class WalletClient {
     getNfts(address: SuiAddress): Promise<GetObjectDataResponse[]>;
     mintNfts(suiAccount: Ed25519Keypair, name?: string, description?: string, imageUrl?: string): Promise<import("./types").SuiExecuteTransactionResponse>;
     transferNft(suiAccount: Ed25519Keypair, nftId: string, recipientID: string): Promise<import("./types").SuiExecuteTransactionResponse>;
-    static getAccountFromMetaData(mnemonic: string, metadata?: AccountMetaData): any;
+    static getAccountFromMetaData(mnemonic: string, metadata: AccountMetaData): any;
 }
 //# sourceMappingURL=wallet_client.d.ts.map

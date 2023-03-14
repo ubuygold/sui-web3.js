@@ -50,6 +50,7 @@ class WalletClient {
             faucetURL: faucetUrl,
         });
         this.serializer = new rpc_txn_data_serializer_1.RpcTxnDataSerializer(nodeUrl);
+        this.nftClient = new nft_client_1.NftClient(this.provider);
     }
     /**
      * Creates new account with bip44 path and mnemonics,
@@ -215,55 +216,6 @@ class WalletClient {
         }));
         return coinIds;
     }
-    async generateTransaction(address, tx) {
-        let dryRunTxBytes;
-        if (typeof tx === 'string') {
-            dryRunTxBytes = tx;
-        }
-        else if (tx instanceof base64_1.Base64DataBuffer) {
-            dryRunTxBytes = tx.toString();
-        }
-        else {
-            switch (tx.kind) {
-                case 'bytes':
-                    dryRunTxBytes = new base64_1.Base64DataBuffer(tx.data).toString();
-                    break;
-                case 'mergeCoin':
-                    dryRunTxBytes = (await this.serializer.newMergeCoin(address, tx.data)).toString();
-                    break;
-                case 'moveCall':
-                    dryRunTxBytes = (await this.serializer.newMoveCall(address, tx.data)).toString();
-                    break;
-                case 'pay':
-                    dryRunTxBytes = (await this.serializer.newPay(address, tx.data)).toString();
-                    break;
-                case 'payAllSui':
-                    dryRunTxBytes = (await this.serializer.newPayAllSui(address, tx.data)).toString();
-                    break;
-                case 'paySui':
-                    dryRunTxBytes = (await this.serializer.newPaySui(address, tx.data)).toString();
-                    break;
-                case 'publish':
-                    dryRunTxBytes = (await this.serializer.newPublish(address, tx.data)).toString();
-                    break;
-                case 'splitCoin':
-                    dryRunTxBytes = (await this.serializer.newSplitCoin(address, tx.data)).toString();
-                    break;
-                case 'transferObject':
-                    dryRunTxBytes = (await this.serializer.newTransferObject(address, tx.data)).toString();
-                    break;
-                case 'transferSui':
-                    dryRunTxBytes = (await this.serializer.newTransferSui(address, tx.data)).toString();
-                    break;
-                default:
-                    throw new Error(`Error, unknown transaction kind ${tx.kind}. Can't dry run transaction.`);
-            }
-        }
-        if (typeof dryRunTxBytes === 'string') {
-            return new base64_1.Base64DataBuffer(dryRunTxBytes);
-        }
-        return dryRunTxBytes;
-    }
     /**
      * Dry run a transaction and return the result.
      * @param address address of the account
@@ -283,35 +235,9 @@ class WalletClient {
                 case 'bytes':
                     dryRunTxBytes = new base64_1.Base64DataBuffer(tx.data).toString();
                     break;
-                case 'mergeCoin':
-                    dryRunTxBytes = (await this.serializer.newMergeCoin(address, tx.data)).toString();
-                    break;
-                case 'moveCall':
-                    dryRunTxBytes = (await this.serializer.newMoveCall(address, tx.data)).toString();
-                    break;
-                case 'pay':
-                    dryRunTxBytes = (await this.serializer.newPay(address, tx.data)).toString();
-                    break;
-                case 'payAllSui':
-                    dryRunTxBytes = (await this.serializer.newPayAllSui(address, tx.data)).toString();
-                    break;
-                case 'paySui':
-                    dryRunTxBytes = (await this.serializer.newPaySui(address, tx.data)).toString();
-                    break;
-                case 'publish':
-                    dryRunTxBytes = (await this.serializer.newPublish(address, tx.data)).toString();
-                    break;
-                case 'splitCoin':
-                    dryRunTxBytes = (await this.serializer.newSplitCoin(address, tx.data)).toString();
-                    break;
-                case 'transferObject':
-                    dryRunTxBytes = (await this.serializer.newTransferObject(address, tx.data)).toString();
-                    break;
-                case 'transferSui':
-                    dryRunTxBytes = (await this.serializer.newTransferSui(address, tx.data)).toString();
-                    break;
                 default:
-                    throw new Error(`Error, unknown transaction kind ${tx.kind}. Can't dry run transaction.`);
+                    dryRunTxBytes = (await this.serializer.serializeToBytes(address, tx)).toString();
+                    break;
             }
         }
         return this.provider.dryRunTransaction(dryRunTxBytes);
@@ -439,29 +365,61 @@ class WalletClient {
     async getNfts(address) {
         let objects = await this.provider.getObjectsOwnedByAddress(address);
         var nfts = [];
+        const originByteNftData = [];
         await Promise.all(objects.map(async (obj) => {
             let objData = await this.provider.getObject(obj.objectId);
+            if (!objData)
+                return;
+            const objectDetails = objData.details;
+            if (typeof objectDetails !== 'string' &&
+                'data' in objectDetails &&
+                'fields' in objectDetails.data) {
+                if (objectDetails.data.fields.bag) {
+                    // originbyte nft standard
+                    originByteNftData.push(objData);
+                    return;
+                }
+            }
             let moveObj = (0, objects_1.getMoveObject)(objData);
-            if (!framework_1.Coin.isCoin(objData) &&
-                moveObj.fields.url) {
+            if (!framework_1.Coin.isCoin(objData) && moveObj.fields.url) {
                 nfts.push(objData);
             }
             else if (moveObj.fields.metadata) {
                 nfts.push(objData);
             }
         }));
+        // fetch originbyte nfts
+        const originByteNfts = await this.nftClient.getNftsById({
+            objects: originByteNftData,
+        });
+        originByteNfts.map((data) => {
+            try {
+                let obj = originByteNftData.filter((val) => val.details.reference.objectId === data.nft.id);
+                if (obj.length === 0)
+                    return;
+                obj = obj[0];
+                obj.details.data.fields = {
+                    ...obj.details.data.fields,
+                    ...data.fields,
+                };
+                nfts.push(obj);
+            }
+            catch (err) {
+                console.log(err);
+            }
+        });
         return nfts;
     }
     async mintNfts(suiAccount, name, description, imageUrl) {
         const keypair = suiAccount;
         const accountSigner = new raw_signer_1.RawSigner(keypair, this.provider, this.serializer);
-        const mintedNft = nft_client_1.ExampleNFT.mintExampleNFT(accountSigner, name, description, imageUrl);
+        const mintedNft = nft_client_1.NftClient.mintExampleNFT(accountSigner, name, description, imageUrl);
         return mintedNft;
     }
     async transferNft(suiAccount, nftId, recipientID) {
         const keypair = suiAccount;
         const accountSigner = new raw_signer_1.RawSigner(keypair, this.provider, this.serializer);
-        const mintedNft = nft_client_1.ExampleNFT.TransferNFT(accountSigner, nftId, recipientID);
+        const mintedNft = nft_client_1.NftClient.TransferNFT(accountSigner, nftId, recipientID);
         return mintedNft;
     }
     static getAccountFromMetaData(mnemonic, metadata) {
